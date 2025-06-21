@@ -1,13 +1,29 @@
-import express, { Request, Response, NextFunction } from 'express';
 import cors from 'cors';
+import dotenv from 'dotenv';
+import express, { NextFunction, Request, Response } from 'express';
+import rateLimit from 'express-rate-limit';
 import helmet from 'helmet';
 import morgan from 'morgan';
-import dotenv from 'dotenv';
+import { authenticateToken, AuthenticatedRequest } from './auth/middleware';
+import authRoutes from './auth/routes';
 
 dotenv.config();
 
 const app = express();
 const PORT: string | number = process.env['PORT'] || 3001;
+
+// Rate limiting
+const limiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 100, // limit each IP to 100 requests per windowMs
+  message: 'Too many requests from this IP, please try again later.',
+});
+
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 5, // limit each IP to 5 requests per windowMs for auth endpoints
+  message: 'Too many authentication attempts, please try again later.',
+});
 
 // Middleware
 app.use(helmet()); // Security headers
@@ -15,6 +31,18 @@ app.use(cors()); // Enable CORS
 app.use(morgan('combined')); // Logging
 app.use(express.json()); // Parse JSON bodies
 app.use(express.urlencoded({ extended: true })); // Parse URL-encoded bodies
+
+
+// Auth routes with rate limiting
+app.use('/api/auth', authLimiter, authRoutes);
+
+// Protected route example
+app.get('/api/protected', authenticateToken, (req: AuthenticatedRequest, res: Response) => {
+  res.json({ 
+    message: 'This is a protected route',
+    user: req.user
+  });
+});
 
 // Routes
 app.get('/', (req: Request, res: Response) => {
