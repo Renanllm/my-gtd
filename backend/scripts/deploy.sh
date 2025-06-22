@@ -1,11 +1,11 @@
 #!/bin/bash
 
-# Deployment script for My GTD Backend
-# Run this script on your VPS after following the initial setup steps
+# Mini-Kojo Backend Deployment Script
+# This script deploys the backend to a VPS
 
 set -e  # Exit on any error
 
-echo "🚀 Starting deployment of My GTD Backend..."
+echo "🚀 Starting Mini-Kojo Backend Deployment..."
 
 # Colors for output
 RED='\033[0;31m'
@@ -26,61 +26,63 @@ print_error() {
     echo -e "${RED}[ERROR]${NC} $1"
 }
 
-# Check if running as root
-if [[ $EUID -eq 0 ]]; then
-   print_error "This script should not be run as root. Please run as a regular user with sudo privileges."
-   exit 1
+# Check if Docker is running
+if ! docker info > /dev/null 2>&1; then
+    print_error "Docker is not running. Please start Docker first."
+    exit 1
 fi
 
 # Check if .env file exists
 if [ ! -f .env ]; then
-    print_error ".env file not found. Please create it first with your production configuration."
+    print_warning ".env file not found. Creating from env.production..."
+    cp env.production .env
+    print_warning "Please edit .env file with your actual values before continuing."
     exit 1
 fi
 
-print_status "Installing dependencies..."
-npm install
+# Stop existing containers
+print_status "Stopping existing containers..."
+docker compose down --remove-orphans
 
-print_status "Building the application..."
-npm run build
+# Build and start services
+print_status "Building and starting services..."
+docker compose up -d --build
 
-print_status "Generating Prisma client..."
-npx prisma generate
+# Wait for services to be ready
+print_status "Waiting for services to be ready..."
+sleep 10
 
+# Check if backend is healthy
+print_status "Checking backend health..."
+for i in {1..30}; do
+    if curl -f http://localhost:3001/health > /dev/null 2>&1; then
+        print_status "Backend is healthy! ✅"
+        break
+    fi
+    if [ $i -eq 30 ]; then
+        print_error "Backend health check failed after 30 attempts"
+        docker compose logs backend
+        exit 1
+    fi
+    sleep 2
+done
+
+# Run database migrations (if needed)
 print_status "Running database migrations..."
-npx prisma migrate deploy
+docker compose exec backend npx prisma migrate deploy || print_warning "Migration failed or not needed"
 
-print_status "Creating logs directory..."
-mkdir -p logs
-
-print_status "Starting application with PM2..."
-pm2 start ecosystem.config.js --env production
-
-print_status "Saving PM2 configuration..."
-pm2 save
-
-print_status "Setting up PM2 startup script..."
-pm2 startup
-
-print_status "Checking application status..."
-pm2 status
-
-print_status "Deployment completed successfully! 🎉"
-print_status "Your application should now be running on port 3001"
-print_status "Check the status with: pm2 status"
-print_status "View logs with: pm2 logs my-gtd-backend"
-
-# Optional: Check if Nginx is configured
-if command -v nginx &> /dev/null; then
-    print_status "Nginx is installed. Make sure to configure it as a reverse proxy."
-    print_warning "Don't forget to set up SSL certificate with Let's Encrypt!"
-else
-    print_warning "Nginx is not installed. Consider installing it for production use."
-fi
-
-print_status "Next steps:"
-echo "1. Configure Nginx reverse proxy (see DEPLOYMENT.md)"
-echo "2. Set up SSL certificate with Let's Encrypt"
-echo "3. Configure firewall rules"
-echo "4. Set up database backups"
-echo "5. Monitor your application logs" 
+# Show running containers
+print_status "Deployment completed! 🎉"
+echo ""
+echo "📊 Container Status:"
+docker compose ps
+echo ""
+echo "🌐 Your API is now available at:"
+echo "   - Local: http://localhost:3001"
+echo "   - External: http://YOUR_VPS_IP:3001"
+echo ""
+echo "📋 Useful commands:"
+echo "   - View logs: docker compose logs -f"
+echo "   - Stop services: docker compose down"
+echo "   - Restart services: docker compose restart"
+echo "   - Update deployment: ./deploy.sh" 
